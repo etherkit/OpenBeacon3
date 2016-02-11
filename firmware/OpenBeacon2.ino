@@ -29,6 +29,7 @@
 #include "morsechar.h"
 #include "modes.h"
 #include "font.h"
+#include "bands.h"
 
 // Class instantiation
 SSD1306 ssd1306;
@@ -50,20 +51,21 @@ JTEncode jtencode;
 #define VCC                      A1
 
 // Default defines
-#define DEFAULT_DFCW_OFFSET      5
-#define DEFAULT_WPM              35000
-#define DEFAULT_MSG_DELAY        10           // in minutes
-#define DEFAULT_MODE             MODE_WSPR
-#define DEFAULT_CALLSIGN         "NT7S"
-#define DEFAULT_GRID             "CN85"
-#define DEFAULT_MSG_1            "MSG1"
-#define DEFAULT_MSG_2            "MSG2"
-#define DEFAULT_MSG_3            "MSG3"
-#define DEFAULT_MSG_4            "MSG4"
-#define DEFAULT_SI5351_INT_CORR  0
-#define DEFAULT_SI5351_EXT_CORR  0
-#define DEFAULT_EXT_GPS_ANT      false
-#define DEFAULT_DBM              27
+#define DEFAULT_DFCW_OFFSET       5
+#define DEFAULT_WPM               35000
+#define DEFAULT_MSG_DELAY         10            // in minutes
+#define DEFAULT_MODE              MODE_WSPR
+#define DEFAULT_BAND              3             // 30 meters
+#define DEFAULT_CALLSIGN          "NT7S"
+#define DEFAULT_GRID              "CN85"
+#define DEFAULT_MSG_1             "MSG1"
+#define DEFAULT_MSG_2             "MSG2"
+#define DEFAULT_MSG_3             "MSG3"
+#define DEFAULT_MSG_4             "MSG4"
+#define DEFAULT_SI5351_INT_CORR   0
+#define DEFAULT_SI5351_EXT_CORR   0
+#define DEFAULT_EXT_GPS_ANT       false
+#define DEFAULT_DBM               27
 
 // Mode defines
 #define MULT_DAH                 3           // DAH is 3x a DIT
@@ -84,11 +86,11 @@ JTEncode jtencode;
 
 
 // Enumerations
-//enum EVENTTYPE {EVENT_TX_ON, EVENT_TX_OFF, EVENT_TUNE};
 enum BUFFER {BUFFER_0, BUFFER_1, BUFFER_2, BUFFER_3, BUFFER_4};
 enum STATE {STATE_IDLE, STATE_DIT, STATE_DAH, STATE_DITDELAY, STATE_DAHDELAY, STATE_WORDDELAY, 
   STATE_MSGDELAY, STATE_EOMDELAY, STATE_CHARDELAY, STATE_HELLCOL, STATE_HELLROW, STATE_CAL, STATE_FSK, 
   STATE_WSPR_INIT, STATE_PREAMBLE, STATE_HELLIDLE};
+enum MENU {MENU_MAIN, MENU_BAND, MENU_MODE};
 
 // Structs
 typedef struct
@@ -97,6 +99,7 @@ typedef struct
   uint8_t version_major;
   uint8_t version_minor;
   enum MODE mode;
+  uint8_t band;
   uint16_t wpm;
   uint8_t msg_delay;
   uint8_t dfcw_offset;
@@ -159,14 +162,14 @@ enum BUFFER cur_buffer;
 uint8_t dfcw_offset;
 boolean tx;
 boolean pa_enable;
-boolean tx_lock;
+boolean tx_lock = false;
+boolean tx_enable = false;
 boolean ext_gps_ant = false;
 char callsign[20];
 char grid[10];
 uint8_t dbm;
-char menu_choice_1[10];
-char menu_choice_2[10];
-char menu_choice_3[10];
+enum MENU cur_menu;
+uint8_t cur_band;
 
 // EEPROM variables
 /*
@@ -203,12 +206,32 @@ void do_encoder_A(void)
     // adjust counter + if A leads B
     if(A_set && !B_set)
     {
-      if(!tx_lock)
+      switch(cur_menu)
       {
-        frequency += power_10(tune_step);
+      case MENU_MAIN:
+        if(!tx_lock)
+        {
+          frequency += power_10(tune_step);
+        }
+        break;
+      case MENU_BAND:
+        cur_band++;
+        if(cur_band >= BAND_COUNT)
+        {
+          cur_band = 0;
+        }
+        // Tune to new band
+        frequency = band_table[cur_band].wspr;
+        break;
+      case MENU_MODE:
+        cur_mode = (enum MODE)(cur_mode + 1);
+        if(cur_mode >= MODE_COUNT)
+        {
+          cur_mode = (enum MODE)0;
+        }
+        break;
       }
       rotating = false;  // no more debouncing until loop() hits again
-      //SerialUSB.println(frequency);
     }
   }
 }
@@ -227,12 +250,38 @@ void do_encoder_B(void)
     //  adjust counter - 1 if B leads A
     if(B_set && !A_set)
     {
-      if(!tx_lock)
+      switch(cur_menu)
       {
-        frequency -= power_10(tune_step);
+      case MENU_MAIN:
+        if(!tx_lock)
+        {
+          frequency -= power_10(tune_step);
+        }
+        break;
+      case MENU_BAND:
+        if(cur_band == 0)
+        {
+          cur_band = BAND_COUNT - 1;
+        }
+        else
+        {
+          cur_band--;
+        }
+        // Tune to new band
+        frequency = band_table[cur_band].wspr;
+        break;
+      case MENU_MODE:
+        if(cur_mode == 0)
+        {
+          cur_mode = (enum MODE)(MODE_COUNT - 1);
+        }
+        else
+        {
+          cur_mode = (enum MODE)(cur_mode - 1);
+        }
+        break;
       }
       rotating = false;
-      //SerialUSB.println(frequency);
     }
   }
 }
@@ -415,153 +464,156 @@ uint32_t get_msg_delay(uint8_t delay_minutes)
 
 void init_tx(void)
 {
-  if(cur_mode == MODE_WSPR || cur_mode == MODE_JT65 || cur_mode == MODE_JT9 || cur_mode == MODE_JT4)
+  if(tx_enable)
   {
-    char cur_grid[8];
-    
-    // Get the current grid square, otherwise use default
-    if(gps.location.isValid())
+    if(cur_mode == MODE_WSPR || cur_mode == MODE_JT65 || cur_mode == MODE_JT9 || cur_mode == MODE_JT4)
     {
-      get_grid_square(gps.location.lat(), gps.location.lng(), cur_grid);
-    }
-    else
-    {
-      strcpy(cur_grid, flash_config.grid);
-    }
-
-    // Truncate grid to 4 characters
-    char grid_4[5];
-    memset(grid_4, 0, 5);
-    strncpy(grid_4, cur_grid, 4);
-
-    // Build JT message
-    char jt_message[14];
-    memset(jt_message, 0, 14);
-    sprintf(jt_message, "%s %s HI", callsign, grid_4);
-    
-    // Reset the WSPR symbol buffer
-    //jtencode.wspr_encode(callsign, grid_4, flash_config.dbm, (uint8_t *)msg_buffer);
-    switch(cur_mode)
-    {
-      case MODE_WSPR:
-        jtencode.wspr_encode(callsign, grid_4, flash_config.dbm, (uint8_t *)msg_buffer);
-        break;
-      case MODE_JT65:
-        jtencode.jt65_encode(jt_message, (uint8_t *)msg_buffer);
-        break;
-      case MODE_JT9:
-        jtencode.jt9_encode(jt_message, (uint8_t *)msg_buffer);
-        break;
-      case MODE_JT4:
-        jtencode.jt4_encode(jt_message, (uint8_t *)msg_buffer);
-        break;
-      default:
-        break;
-    }
-    
-    // Convert symbols from uints to chars representing those values
-    /*
-    uint8_t i;
-    for(i = 0; i < WSPR_BUFFER_SIZE - 1; i++)
-    {
-      // TODO: need to make this safer
-      *(msg_buffer + i) = *(symbol_buffer + i) + '0';
-    }
-    */
-    // Append 0xFF to indicate EOM
-    switch(cur_mode)
-    {
-      case MODE_WSPR:
-        msg_buffer[WSPR_SYMBOL_COUNT] = 0xFF;
-        break;
-      case MODE_JT65:
-        msg_buffer[JT65_SYMBOL_COUNT] = 0xFF;
-        break;
-      case MODE_JT9:
-        msg_buffer[JT9_SYMBOL_COUNT] = 0xFF;
-        break;
-      case MODE_JT4:
-        msg_buffer[JT4_SYMBOL_COUNT] = 0xFF;
-        break;
-      default:
-        break;
-    }
-    
-    cur_msg_p = msg_buffer;
-    cur_character = '\0';
-
-    // Build the display buffer
-    memset(display_buffer, 0, 22);
-    if(cur_mode == MODE_WSPR)
-    {
-      sprintf(display_buffer, "%s %s %d", flash_config.callsign, grid_4, flash_config.dbm);
-    }
-    else
-    {
-      strcpy(display_buffer, jt_message);
-    }
-
-    // Reset to IDLE state
-    cur_state_end = cur_timer;
-    cur_state = STATE_FSK;
-  }
-  else
-  {
-    // Reset the message buffer
-    switch(cur_buffer)
-    {
-    case BUFFER_0:
-    default:
-      strcpy(msg_buffer, flash_config.callsign);
-      break;
-    case BUFFER_1:
-      strcpy(msg_buffer, flash_config.msg_mem_1);
-      break;
-    case BUFFER_2:
-      strcpy(msg_buffer, flash_config.msg_mem_2);
-      break;
-    case BUFFER_3:
-      strcpy(msg_buffer, flash_config.msg_mem_3);
-      break;
-    case BUFFER_4:
-      strcpy(msg_buffer, flash_config.msg_mem_4);
-      break;
-    }
-    
-    cur_msg_p = msg_buffer;
-    cur_character = '\0';
-
-    // If in message delay mode, set the delay
-    if(msg_delay > 0)
-    {
-      msg_delay_end = cur_timer + get_msg_delay(msg_delay);
-    }
-
-    // Reset Hell index
-    cur_hell_row = 0;
-    cur_hell_col = 0;
-
-    // Reset WPM
-    if(cur_mode == MODE_CW)
-    {
-      wpm = flash_config.wpm;
-    }
-    else
-    {
-      wpm = dit_speed[cur_mode];
-    }
-    set_wpm(wpm);
-
-    if(cur_mode == MODE_DFCW3 || cur_mode == MODE_DFCW6 || cur_mode == MODE_DFCW10 || cur_mode == MODE_DFCW120)
-    {
-      cur_state_end = cur_timer + (dit_length * MULT_WORDDELAY);
-      cur_state = STATE_PREAMBLE;
-    }
-    else
-    {
+      char cur_grid[8];
+      
+      // Get the current grid square, otherwise use default
+      if(gps.location.isValid())
+      {
+        get_grid_square(gps.location.lat(), gps.location.lng(), cur_grid);
+      }
+      else
+      {
+        strcpy(cur_grid, flash_config.grid);
+      }
+  
+      // Truncate grid to 4 characters
+      char grid_4[5];
+      memset(grid_4, 0, 5);
+      strncpy(grid_4, cur_grid, 4);
+  
+      // Build JT message
+      char jt_message[14];
+      memset(jt_message, 0, 14);
+      sprintf(jt_message, "%s %s HI", callsign, grid_4);
+      
+      // Reset the WSPR symbol buffer
+      //jtencode.wspr_encode(callsign, grid_4, flash_config.dbm, (uint8_t *)msg_buffer);
+      switch(cur_mode)
+      {
+        case MODE_WSPR:
+          jtencode.wspr_encode(callsign, grid_4, flash_config.dbm, (uint8_t *)msg_buffer);
+          break;
+        case MODE_JT65:
+          jtencode.jt65_encode(jt_message, (uint8_t *)msg_buffer);
+          break;
+        case MODE_JT9:
+          jtencode.jt9_encode(jt_message, (uint8_t *)msg_buffer);
+          break;
+        case MODE_JT4:
+          jtencode.jt4_encode(jt_message, (uint8_t *)msg_buffer);
+          break;
+        default:
+          break;
+      }
+      
+      // Convert symbols from uints to chars representing those values
+      /*
+      uint8_t i;
+      for(i = 0; i < WSPR_BUFFER_SIZE - 1; i++)
+      {
+        // TODO: need to make this safer
+        *(msg_buffer + i) = *(symbol_buffer + i) + '0';
+      }
+      */
+      // Append 0xFF to indicate EOM
+      switch(cur_mode)
+      {
+        case MODE_WSPR:
+          msg_buffer[WSPR_SYMBOL_COUNT] = 0xFF;
+          break;
+        case MODE_JT65:
+          msg_buffer[JT65_SYMBOL_COUNT] = 0xFF;
+          break;
+        case MODE_JT9:
+          msg_buffer[JT9_SYMBOL_COUNT] = 0xFF;
+          break;
+        case MODE_JT4:
+          msg_buffer[JT4_SYMBOL_COUNT] = 0xFF;
+          break;
+        default:
+          break;
+      }
+      
+      cur_msg_p = msg_buffer;
+      cur_character = '\0';
+  
+      // Build the display buffer
+      memset(display_buffer, 0, 22);
+      if(cur_mode == MODE_WSPR)
+      {
+        sprintf(display_buffer, "%s %s %d", flash_config.callsign, grid_4, flash_config.dbm);
+      }
+      else
+      {
+        strcpy(display_buffer, jt_message);
+      }
+  
       // Reset to IDLE state
       cur_state_end = cur_timer;
-      cur_state = STATE_IDLE;
+      cur_state = STATE_FSK;
+    }
+    else
+    {
+      // Reset the message buffer
+      switch(cur_buffer)
+      {
+      case BUFFER_0:
+      default:
+        strcpy(msg_buffer, flash_config.callsign);
+        break;
+      case BUFFER_1:
+        strcpy(msg_buffer, flash_config.msg_mem_1);
+        break;
+      case BUFFER_2:
+        strcpy(msg_buffer, flash_config.msg_mem_2);
+        break;
+      case BUFFER_3:
+        strcpy(msg_buffer, flash_config.msg_mem_3);
+        break;
+      case BUFFER_4:
+        strcpy(msg_buffer, flash_config.msg_mem_4);
+        break;
+      }
+      
+      cur_msg_p = msg_buffer;
+      cur_character = '\0';
+  
+      // If in message delay mode, set the delay
+      if(msg_delay > 0)
+      {
+        msg_delay_end = cur_timer + get_msg_delay(msg_delay);
+      }
+  
+      // Reset Hell index
+      cur_hell_row = 0;
+      cur_hell_col = 0;
+  
+      // Reset WPM
+      if(cur_mode == MODE_CW)
+      {
+        wpm = flash_config.wpm;
+      }
+      else
+      {
+        wpm = dit_speed[cur_mode];
+      }
+      set_wpm(wpm);
+  
+      if(cur_mode == MODE_DFCW3 || cur_mode == MODE_DFCW6 || cur_mode == MODE_DFCW10 || cur_mode == MODE_DFCW120)
+      {
+        cur_state_end = cur_timer + (dit_length * MULT_WORDDELAY);
+        cur_state = STATE_PREAMBLE;
+      }
+      else
+      {
+        // Reset to IDLE state
+        cur_state_end = cur_timer;
+        cur_state = STATE_IDLE;
+      }
     }
   }
 }
@@ -674,102 +726,181 @@ void update_display(void)
     ssd1306.text(123, 18, TEXT_FONT_5X8, false, "X");
   }
 
-  // PA current and supply voltage
-  yield();
-  tx_current = get_tx_current();
-  sprintf(text, "PA:%u mA", tx_current);
-  yield();
-  ssd1306.text(0, 35, TEXT_FONT_5X8, false, text);
-  yield();
-  supply_voltage = get_supply_voltage();
-  sprintf(text, "VDD:%u.%u V", supply_voltage / 1000, (supply_voltage % 1000) / 100);
-  yield();
-  ssd1306.text(64, 35, TEXT_FONT_5X8, false, text);
-
-  // Message buffer
-  // Can show 19 chars at a time.
+  uint8_t indicator_pos;
   char temp_buffer[22];
-  memset(temp_buffer, 0, 22);
-  uint8_t indicator_pos = cur_msg_p - msg_buffer;
-  yield();
 
-  if(cur_mode == MODE_WSPR || cur_mode == MODE_JT65 || cur_mode == MODE_JT9 || cur_mode == MODE_JT4)
+  switch(cur_menu)
   {
-    // probably need to check for updates of grid while idling
-    if(strcmp(display_buffer, "") == 0)
+  case MENU_MAIN:
+    // PA current and supply voltage
+    yield();
+    //tx_current = get_tx_current();
+    sprintf(text, "PA:%u mA", tx_current);
+    //yield();
+    ssd1306.text(0, 35, TEXT_FONT_5X8, false, text);
+    yield();
+    //supply_voltage = get_supply_voltage();
+    sprintf(text, "VDD:%u.%u V", supply_voltage / 1000, (supply_voltage % 1000) / 100);
+    yield();
+    ssd1306.text(64, 35, TEXT_FONT_5X8, false, text);
+  
+    // Message buffer
+    // Can show 19 chars at a time.
+    //char temp_buffer[22];
+    memset(temp_buffer, 0, 22);
+    //uint8_t indicator_pos = cur_msg_p - msg_buffer;
+    indicator_pos = cur_msg_p - msg_buffer;
+    yield();
+  
+    if(cur_mode == MODE_WSPR || cur_mode == MODE_JT65 || cur_mode == MODE_JT9 || cur_mode == MODE_JT4)
     {
-      char cur_grid[8];
-      
-      // Get the current grid square, otherwise use default
-      if(gps.location.isValid())
+      // probably need to check for updates of grid while idling
+      if(strcmp(display_buffer, "") == 0)
       {
-        get_grid_square(gps.location.lat(), gps.location.lng(), cur_grid);
-      }
-      else
-      {
-        strcpy(cur_grid, flash_config.grid);
+        char cur_grid[8];
+        
+        // Get the current grid square, otherwise use default
+        if(gps.location.isValid())
+        {
+          get_grid_square(gps.location.lat(), gps.location.lng(), cur_grid);
+        }
+        else
+        {
+          strcpy(cur_grid, flash_config.grid);
+        }
+    
+        // Truncate grid to 4 characters
+        char grid_4[5];
+        memset(grid_4, 0, 5);
+        strncpy(grid_4, cur_grid, 4);
+        
+        sprintf(display_buffer, "%s %s %d", flash_config.callsign, grid_4, flash_config.dbm);
       }
   
-      // Truncate grid to 4 characters
-      char grid_4[5];
-      memset(grid_4, 0, 5);
-      strncpy(grid_4, cur_grid, 4);
-      
-      sprintf(display_buffer, "%s %s %d", flash_config.callsign, grid_4, flash_config.dbm);
+      yield();
+      strcpy(text, display_buffer);
+      ssd1306.text(0, 44, TEXT_FONT_5X8, false, text);
     }
-
-    strcpy(text, display_buffer);
-
-    ssd1306.text(0, 44, TEXT_FONT_5X8, false, text);
-  }
-  else
-  {
-    // TODO: add indicator for message delay
-    if(strlen(msg_buffer) > 19)
+    else
     {
-      if(indicator_pos > 9)
+      // TODO: add indicator for message delay
+      if(strlen(msg_buffer) > 19)
       {
-        if((strlen(msg_buffer) - indicator_pos) < 10)
+        if(indicator_pos > 9)
         {
-          yield();
-          strcpy(temp_buffer, "\xAE");
-          strncat(temp_buffer, msg_buffer + (strlen(msg_buffer) - 17), 18);
-          indicator_pos -= (strlen(msg_buffer) - 18);
+          if((strlen(msg_buffer) - indicator_pos) < 10)
+          {
+            yield();
+            strcpy(temp_buffer, "\xAE");
+            strncat(temp_buffer, msg_buffer + (strlen(msg_buffer) - 17), 18);
+            indicator_pos -= (strlen(msg_buffer) - 18);
+          }
+          else
+          {
+            yield();
+            strcpy(temp_buffer, "\xAE");
+            strncat(temp_buffer, msg_buffer + indicator_pos - 8, 17);
+            strcat(temp_buffer, "\xAF");
+            indicator_pos = 9;
+          }
         }
         else
         {
           yield();
-          strcpy(temp_buffer, "\xAE");
-          strncat(temp_buffer, msg_buffer + indicator_pos - 8, 17);
+          strncpy(temp_buffer, msg_buffer, 18);
           strcat(temp_buffer, "\xAF");
-          indicator_pos = 9;
         }
       }
       else
       {
-        yield();
-        strncpy(temp_buffer, msg_buffer, 18);
-        strcat(temp_buffer, "\xAF");
+        strncpy(temp_buffer, msg_buffer, 19);
       }
+      yield();
+      sprintf(text, "%1d:%s", cur_buffer, temp_buffer);
+      ssd1306.text(0, 44, TEXT_FONT_5X8, false, text);
+    
+      // Current character indicator
+      yield();
+      ssd1306.hline(52, (indicator_pos + 2) * 6, ((indicator_pos + 2) * 6) + 4, PIXEL_WHITE);
     }
-    else
-    {
-      strncpy(temp_buffer, msg_buffer, 19);
-    }
-    yield();
-    sprintf(text, "%1d:%s", cur_buffer, temp_buffer);
-    ssd1306.text(0, 44, TEXT_FONT_5X8, false, text);
-  
-    // Current character indicator
-    yield();
-    ssd1306.hline(52, (indicator_pos + 2) * 6, ((indicator_pos + 2) * 6) + 4, PIXEL_WHITE);
+    break;
+  case MENU_BAND:
+    sprintf(text, "%s", band_table[cur_band].name);
+    ssd1306.text(50, 40, TEXT_FONT_5X8, false, text);
+    break;
+  case MENU_MODE:
+    sprintf(text, "%s", mode_list[cur_mode]);
+    ssd1306.text(50, 40, TEXT_FONT_5X8, false, text);
+    break;
   }
   
   // Menu system
   yield();
-  ssd1306.hline(54, 0, 127, PIXEL_WHITE);
-  //sprintf(text, "Menu");
-  //ssd1306.text(0, 56, TEXT_FONT_5X8, false, text);
+  ssd1306.hline(53, 0, 127, PIXEL_WHITE);
+  yield();
+  ssd1306.vline(40, 54, 63, PIXEL_WHITE);
+  yield();
+  ssd1306.vline(81, 54, 63, PIXEL_WHITE);
+
+  // S1
+  yield();
+  switch(cur_menu)
+  {
+  case MENU_MAIN:
+    sprintf(text, "Menu");
+    break;
+  case MENU_BAND:
+  case MENU_MODE:
+    sprintf(text, "Band");
+    break;
+  }
+  ssd1306.text(7, 55, TEXT_FONT_5X8, false, text);
+
+  // S2
+  yield();
+  switch(cur_menu)
+  {
+  case MENU_MAIN:
+    if(cur_state == STATE_IDLE)
+    {
+      sprintf(text, "Start");
+      ssd1306.text(46, 55, TEXT_FONT_5X8, false, text);
+    }
+    else
+    {
+      sprintf(text, "Stop");
+      ssd1306.text(49, 55, TEXT_FONT_5X8, false, text);
+    }
+    break;
+  case MENU_BAND:
+  case MENU_MODE:
+    sprintf(text, "Mode");
+    ssd1306.text(49, 55, TEXT_FONT_5X8, false, text);
+    break;
+  }
+
+  // S3
+  yield();
+  switch(cur_menu)
+  {
+  case MENU_MAIN:
+    if(tx_enable)
+    {
+      sprintf(text, "TX Dis");
+      ssd1306.text(86, 55, TEXT_FONT_5X8, false, text);
+    }
+    else
+    {
+      sprintf(text, "TX Enb");
+      ssd1306.text(86, 55, TEXT_FONT_5X8, false, text);
+    }
+    break;
+  case MENU_BAND:
+  case MENU_MODE:
+    sprintf(text, "Exit");
+    ssd1306.text(86, 55, TEXT_FONT_5X8, false, text);
+    break;
+  }
   
   // Display update
   yield();
@@ -794,15 +925,45 @@ void process_inputs(void)
   if(digitalRead(ENC_BTN) == LOW)
   {
     delay(50);   // delay to debounce
-    if (digitalRead(ENC_BTN) == LOW)
+    if(digitalRead(ENC_BTN) == LOW)
     {
-      if(tune_step < 5)
+      uint8_t i;
+      for(i = 0; i < 10; i++)
       {
-        tune_step++;
+        //yield();
+        if(digitalRead(ENC_BTN) == HIGH)
+        {
+          // short press
+          if(cur_menu == MENU_MAIN)
+          {
+            if(tune_step < 5)
+            {
+              tune_step++;
+            }
+            else
+            {
+              tune_step = 0;
+            }
+            delay(50);
+            break;
+          }
+          else
+          {
+            cur_menu = MENU_MAIN;
+            delay(50);
+            break;
+          }
+        }
+        delay(50);
       }
-      else
+      if(digitalRead(ENC_BTN) == LOW)
       {
-        tune_step = 0;
+        // long press
+        cur_menu = MENU_BAND;
+        while(digitalRead(ENC_BTN) == LOW)
+        {
+          delay(50);
+        }
       }
       
       delay(50); //delay to avoid many steps at one
@@ -816,7 +977,16 @@ void process_inputs(void)
     delay(50);   // delay to debounce
     if (digitalRead(BTN_S1) == LOW)
     {
-      init_tx();
+      switch(cur_menu)
+      {
+      case MENU_MAIN:
+        init_tx();
+        break;
+      case MENU_BAND:
+      case MENU_MODE:
+        cur_menu = MENU_BAND;
+        break;
+      }
       
       delay(50); //delay to avoid many steps at one
     }
@@ -829,15 +999,54 @@ void process_inputs(void)
     delay(50);   // delay to debounce
     if (digitalRead(BTN_S2) == LOW)
     {
-      if(ext_gps_ant == true)
+      switch(cur_menu)
       {
-        ext_gps_ant = false;
-        digitalWrite(GPS_ANT, LOW);
+      case MENU_MAIN:
+        if(cur_state == STATE_IDLE)
+        {
+          tx_enable = true;
+          init_tx();
+        }
+        else
+        {
+          tx_enable = false;
+          cur_state = STATE_IDLE;
+          cur_state_end = 0xFFFFFFFFFFFFFFFF;
+        }
+        break;
+      case MENU_BAND:
+      case MENU_MODE:
+        cur_menu = MENU_MODE;
+        break;
       }
-      else
+      
+      delay(50); //delay to avoid many steps at one
+    }
+  }
+
+  yield();
+  // Handle S3 button
+  if(digitalRead(BTN_S3) == LOW)
+  {
+    delay(50);   // delay to debounce
+    if (digitalRead(BTN_S3) == LOW)
+    {
+      switch(cur_menu)
       {
-        ext_gps_ant = true;
-        digitalWrite(GPS_ANT, HIGH);
+      case MENU_MAIN:
+        if(tx_enable)
+        {
+          tx_enable = false;
+        }
+        else
+        {
+          tx_enable = true;
+        }
+        break;
+      case MENU_BAND:
+      case MENU_MODE:
+        cur_menu = MENU_MAIN;
+        break;
       }
       
       delay(50); //delay to avoid many steps at one
@@ -852,10 +1061,10 @@ void process_inputs(void)
   while(Serial1.available() > 0)
   {
     ser_buffer = Serial1.read();
-    if(GPS_DEBUG)
-    {
-      SerialUSB.print(ser_buffer);
-    }
+    //if(GPS_DEBUG)
+    //{
+      //SerialUSB.print(ser_buffer);
+    //}
     gps.encode(ser_buffer);
   }
 }
@@ -900,7 +1109,7 @@ void setup()
   pinMode(ENC_BTN, INPUT_PULLUP);
   pinMode(BTN_S1, INPUT_PULLUP);
   pinMode(BTN_S2, INPUT_PULLUP);
-  pinMode(BTN_S3, OUTPUT);
+  pinMode(BTN_S3, INPUT_PULLUP);
   pinMode(REFCLK, INPUT);
   pinMode(GPS_ANT, OUTPUT);
   pinMode(TX_KEY, OUTPUT);
@@ -931,6 +1140,7 @@ void setup()
     flash_config.version_major = 0;
     flash_config.version_minor = 1;
     flash_config.mode = DEFAULT_MODE;
+    flash_config.band = DEFAULT_BAND;
     flash_config.wpm = DEFAULT_WPM;
     flash_config.msg_delay = DEFAULT_MSG_DELAY;
     flash_config.dfcw_offset = DEFAULT_DFCW_OFFSET;
@@ -950,6 +1160,7 @@ void setup()
 
   // Initialize states
   cur_mode = flash_config.mode;
+  cur_band = flash_config.band;
   set_wpm(flash_config.wpm);
   msg_delay = flash_config.msg_delay;
   dfcw_offset = flash_config.dfcw_offset;
@@ -960,6 +1171,7 @@ void setup()
   cur_state = STATE_IDLE;
   cur_state_end = 0xFFFFFFFFFFFFFFFF;
   msg_delay_end = cur_timer + get_msg_delay(msg_delay);
+  cur_menu = MENU_MAIN;
   
   cur_timer = 0;
   tx = 0;
@@ -1555,30 +1767,7 @@ void loop()
         break;
       }
 
-      // Transmit the WSPR symbol
-      /*
-      switch(*cur_msg_p)
-      {
-      case '0':
-        si5351.set_freq(frequency * 100ULL, 0, SI5351_CLK0);
-        break;
-
-      case '1':
-        si5351.set_freq((frequency * 100ULL) + (WSPR_TONE_SPACING), 0, SI5351_CLK0);
-        break;
-
-      case '2':
-        si5351.set_freq((frequency * 100ULL) + (WSPR_TONE_SPACING * 2), 0, SI5351_CLK0);
-        break;
-
-      case '3':
-        si5351.set_freq((frequency * 100ULL) + (WSPR_TONE_SPACING * 3), 0, SI5351_CLK0);
-        break;
-
-      default:
-        break;
-      }
-      */
+      // Transmit the FSK symbol
       si5351.set_freq((frequency * 100ULL) + (tone_spacing * (*(cur_msg_p))), 0, SI5351_CLK0);
 
       if(cur_timer > cur_state_end)
@@ -1619,17 +1808,6 @@ void loop()
           }
           
           cur_state = STATE_FSK;
-        }
-
-        if(toggle)
-        {
-          digitalWrite(BTN_S3, HIGH);
-          toggle = false;
-        }
-        else
-        {
-          digitalWrite(BTN_S3, LOW);
-          toggle = true;
         }
       }
       break;
@@ -1786,7 +1964,12 @@ void loop()
     gps.encode(ser_buffer);
   }
   */
+
+  // Read ADC values
   yield();
+  tx_current = get_tx_current();
+  yield();
+  supply_voltage = get_supply_voltage();
 
   // Handle the USB-UART bridge
   char in_data;
@@ -1796,95 +1979,98 @@ void loop()
    // yield();
   //}
 
-  if(SerialUSB.available() > 0)   // see if incoming serial data:
-  { 
-    in_data = SerialUSB.read();  // read oldest byte in serial buffer:
-    //Serial.readBytes(in_data, 1);
-
-    yield();
-    switch(in_data)
-    {
-    case 'R':
-      {
-        DynamicJsonBuffer jsonBuffer;
-        JsonObject& root = jsonBuffer.createObject();
-        root["sensor"] = "gps";
-        root["time"] = 1351824120;
+  //if(SerialUSB)
+  //{
+    if(SerialUSB.available() > 0)   // see if incoming serial data:
+    { 
+      in_data = SerialUSB.read();  // read oldest byte in serial buffer:
+      //Serial.readBytes(in_data, 1);
   
-        root.printTo(SerialUSB);
-        break;
-      }
-    case 'W':
+      yield();
+      switch(in_data)
       {
-        String recv_config;
-        char last_data;
-
-        // Don't like this blocking code, but the scheduler seems
-        // to lose serial data. Need better solution
-        while(last_data != '@')
+      case 'R':
         {
-          if(SerialUSB.available() > 0)
+          DynamicJsonBuffer jsonBuffer;
+          JsonObject& root = jsonBuffer.createObject();
+          root["sensor"] = "gps";
+          root["time"] = 1351824120;
+    
+          root.printTo(SerialUSB);
+          break;
+        }
+      case 'W':
+        {
+          String recv_config;
+          char last_data;
+  
+          // Don't like this blocking code, but the scheduler seems
+          // to lose serial data. Need better solution
+          while(last_data != '@')
           {
-            in_data = SerialUSB.read();
-            last_data = in_data;
-            if(last_data != '@')
+            if(SerialUSB.available() > 0)
             {
-              recv_config += in_data;
+              in_data = SerialUSB.read();
+              last_data = in_data;
+              if(last_data != '@')
+              {
+                recv_config += in_data;
+              }
             }
+            //yield();
           }
-          yield();
-        }
-
-        yield();
-        SerialUSB.println(recv_config);
   
-        DynamicJsonBuffer jsonBuffer;
-        JsonObject& root = jsonBuffer.parseObject(recv_config);
-        if(!root.success())
-        {
-          SerialUSB.println("Unable to parse configuration");
-          return;
+          yield();
+          SerialUSB.println(recv_config);
+    
+          DynamicJsonBuffer jsonBuffer;
+          JsonObject& root = jsonBuffer.parseObject(recv_config);
+          if(!root.success())
+          {
+            SerialUSB.println("Unable to parse configuration");
+            return;
+          }
+  
+          yield();
+          if(root.containsKey("default_buffer"))
+          {
+            flash_config.buffer = (enum BUFFER)root["buffer"].as<uint8_t>();
+            // validate data
+          }
+          if(root.containsKey("msg_mem_1"))
+          {
+            strcpy(flash_config.msg_mem_1, root["msg_mem_1"]);
+          }
+          if(root.containsKey("msg_mem_2"))
+          {
+            strcpy(flash_config.msg_mem_2, root["msg_mem_2"]);
+          }
+          if(root.containsKey("msg_mem_3"))
+          {
+            strcpy(flash_config.msg_mem_3, root["msg_mem_3"]);
+          }
+          if(root.containsKey("msg_mem_4"))
+          {
+            strcpy(flash_config.msg_mem_4, root["msg_mem_4"]);
+          }
+          if(root.containsKey("callsign"))
+          {
+            strcpy(flash_config.callsign, root["callsign"]);
+          }
+          if(root.containsKey("grid"))
+          {
+            strcpy(flash_config.grid, root["grid"]);
+          }
+          if(root.containsKey("ext_gps_ant"))
+          {
+            // validate data
+            flash_config.ext_gps_ant = root["ext_gps_ant"].as<boolean>();
+          }
+          
+          flash_store.write(flash_config);
+          break;
         }
-
-        yield();
-        if(root.containsKey("default_buffer"))
-        {
-          flash_config.buffer = (enum BUFFER)root["buffer"].as<uint8_t>();
-          // validate data
-        }
-        if(root.containsKey("msg_mem_1"))
-        {
-          strcpy(flash_config.msg_mem_1, root["msg_mem_1"]);
-        }
-        if(root.containsKey("msg_mem_2"))
-        {
-          strcpy(flash_config.msg_mem_2, root["msg_mem_2"]);
-        }
-        if(root.containsKey("msg_mem_3"))
-        {
-          strcpy(flash_config.msg_mem_3, root["msg_mem_3"]);
-        }
-        if(root.containsKey("msg_mem_4"))
-        {
-          strcpy(flash_config.msg_mem_4, root["msg_mem_4"]);
-        }
-        if(root.containsKey("callsign"))
-        {
-          strcpy(flash_config.callsign, root["callsign"]);
-        }
-        if(root.containsKey("grid"))
-        {
-          strcpy(flash_config.grid, root["grid"]);
-        }
-        if(root.containsKey("ext_gps_ant"))
-        {
-          // validate data
-          flash_config.ext_gps_ant = root["ext_gps_ant"].as<boolean>();
-        }
-        
-        flash_store.write(flash_config);
-        break;
       }
     }
-  }
+  //}
 }

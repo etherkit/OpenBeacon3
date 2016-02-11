@@ -37,7 +37,7 @@
 #define MORSECHAR_H_
 
 #include <stdint.h>
-#include <avr/pgmspace.h>
+//#include <avr/pgmspace.h>
 
 // The morsechar array maps to the standard ASCII table starting at ASCII 32 (SPACE).
 //

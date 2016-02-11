@@ -37,7 +37,7 @@
 #define FONT_H_
 
 #include <stdint.h>
-#include <avr/pgmspace.h>
+//#include <avr/pgmspace.h>
 
 #define FONT_START				32
 #define HELL_COLS				5			// Number of columns in the font
