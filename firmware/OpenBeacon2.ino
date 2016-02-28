@@ -65,6 +65,8 @@ JTEncode jtencode;
 #define DEFAULT_SI5351_INT_CORR   0
 #define DEFAULT_SI5351_EXT_CORR   0
 #define DEFAULT_EXT_GPS_ANT       false
+#define DEFAULT_EXT_PLL_REF       false
+#define DEFAULT_EXT_PLL_REF_FREQ  25000000UL
 #define DEFAULT_DBM               27
 
 // Mode defines
@@ -113,6 +115,8 @@ typedef struct
   int32_t si5351_int_corr;
   int32_t si5351_ext_corr;
   boolean ext_gps_ant;
+  boolean ext_pll_ref;
+  uint32_t ext_pll_ref_freq;
   uint8_t dbm;
 } Config;
 
@@ -165,6 +169,7 @@ boolean pa_enable;
 boolean tx_lock = false;
 boolean tx_enable = false;
 boolean ext_gps_ant = false;
+boolean ext_pll_ref = false;
 char callsign[20];
 char grid[10];
 uint8_t dbm;
@@ -274,6 +279,7 @@ void do_encoder_B(void)
         if(cur_mode == 0)
         {
           cur_mode = (enum MODE)(MODE_COUNT - 1);
+          
         }
         else
         {
@@ -466,154 +472,166 @@ void init_tx(void)
 {
   if(tx_enable)
   {
+    tx_reset();
+
     if(cur_mode == MODE_WSPR || cur_mode == MODE_JT65 || cur_mode == MODE_JT9 || cur_mode == MODE_JT4)
     {
-      char cur_grid[8];
-      
-      // Get the current grid square, otherwise use default
-      if(gps.location.isValid())
-      {
-        get_grid_square(gps.location.lat(), gps.location.lng(), cur_grid);
-      }
-      else
-      {
-        strcpy(cur_grid, flash_config.grid);
-      }
-  
-      // Truncate grid to 4 characters
-      char grid_4[5];
-      memset(grid_4, 0, 5);
-      strncpy(grid_4, cur_grid, 4);
-  
-      // Build JT message
-      char jt_message[14];
-      memset(jt_message, 0, 14);
-      sprintf(jt_message, "%s %s HI", callsign, grid_4);
-      
-      // Reset the WSPR symbol buffer
-      //jtencode.wspr_encode(callsign, grid_4, flash_config.dbm, (uint8_t *)msg_buffer);
-      switch(cur_mode)
-      {
-        case MODE_WSPR:
-          jtencode.wspr_encode(callsign, grid_4, flash_config.dbm, (uint8_t *)msg_buffer);
-          break;
-        case MODE_JT65:
-          jtencode.jt65_encode(jt_message, (uint8_t *)msg_buffer);
-          break;
-        case MODE_JT9:
-          jtencode.jt9_encode(jt_message, (uint8_t *)msg_buffer);
-          break;
-        case MODE_JT4:
-          jtencode.jt4_encode(jt_message, (uint8_t *)msg_buffer);
-          break;
-        default:
-          break;
-      }
-      
-      // Convert symbols from uints to chars representing those values
-      /*
-      uint8_t i;
-      for(i = 0; i < WSPR_BUFFER_SIZE - 1; i++)
-      {
-        // TODO: need to make this safer
-        *(msg_buffer + i) = *(symbol_buffer + i) + '0';
-      }
-      */
-      // Append 0xFF to indicate EOM
-      switch(cur_mode)
-      {
-        case MODE_WSPR:
-          msg_buffer[WSPR_SYMBOL_COUNT] = 0xFF;
-          break;
-        case MODE_JT65:
-          msg_buffer[JT65_SYMBOL_COUNT] = 0xFF;
-          break;
-        case MODE_JT9:
-          msg_buffer[JT9_SYMBOL_COUNT] = 0xFF;
-          break;
-        case MODE_JT4:
-          msg_buffer[JT4_SYMBOL_COUNT] = 0xFF;
-          break;
-        default:
-          break;
-      }
-      
-      cur_msg_p = msg_buffer;
-      cur_character = '\0';
-  
-      // Build the display buffer
-      memset(display_buffer, 0, 22);
-      if(cur_mode == MODE_WSPR)
-      {
-        sprintf(display_buffer, "%s %s %d", flash_config.callsign, grid_4, flash_config.dbm);
-      }
-      else
-      {
-        strcpy(display_buffer, jt_message);
-      }
-  
-      // Reset to IDLE state
       cur_state_end = cur_timer;
       cur_state = STATE_FSK;
     }
+  }
+}
+
+
+void tx_reset(void)
+{
+  if(cur_mode == MODE_WSPR || cur_mode == MODE_JT65 || cur_mode == MODE_JT9 || cur_mode == MODE_JT4)
+  {
+    char cur_grid[8];
+    
+    // Get the current grid square, otherwise use default
+    if(gps.location.isValid())
+    {
+      get_grid_square(gps.location.lat(), gps.location.lng(), cur_grid);
+    }
     else
     {
-      // Reset the message buffer
-      switch(cur_buffer)
-      {
-      case BUFFER_0:
+      strcpy(cur_grid, flash_config.grid);
+    }
+
+    // Truncate grid to 4 characters
+    char grid_4[5];
+    memset(grid_4, 0, 5);
+    strncpy(grid_4, cur_grid, 4);
+
+    // Build JT message
+    char jt_message[14];
+    memset(jt_message, 0, 14);
+    sprintf(jt_message, "%s %s HI", callsign, grid_4);
+    
+    // Reset the WSPR symbol buffer
+    //jtencode.wspr_encode(callsign, grid_4, flash_config.dbm, (uint8_t *)msg_buffer);
+    switch(cur_mode)
+    {
+      case MODE_WSPR:
+        jtencode.wspr_encode(callsign, grid_4, flash_config.dbm, (uint8_t *)msg_buffer);
+        break;
+      case MODE_JT65:
+        jtencode.jt65_encode(jt_message, (uint8_t *)msg_buffer);
+        break;
+      case MODE_JT9:
+        jtencode.jt9_encode(jt_message, (uint8_t *)msg_buffer);
+        break;
+      case MODE_JT4:
+        jtencode.jt4_encode(jt_message, (uint8_t *)msg_buffer);
+        break;
       default:
-        strcpy(msg_buffer, flash_config.callsign);
         break;
-      case BUFFER_1:
-        strcpy(msg_buffer, flash_config.msg_mem_1);
+    }
+    
+    // Convert symbols from uints to chars representing those values
+    /*
+    uint8_t i;
+    for(i = 0; i < WSPR_BUFFER_SIZE - 1; i++)
+    {
+      // TODO: need to make this safer
+      *(msg_buffer + i) = *(symbol_buffer + i) + '0';
+    }
+    */
+    // Append 0xFF to indicate EOM
+    switch(cur_mode)
+    {
+      case MODE_WSPR:
+        msg_buffer[WSPR_SYMBOL_COUNT] = 0xFF;
         break;
-      case BUFFER_2:
-        strcpy(msg_buffer, flash_config.msg_mem_2);
+      case MODE_JT65:
+        msg_buffer[JT65_SYMBOL_COUNT] = 0xFF;
         break;
-      case BUFFER_3:
-        strcpy(msg_buffer, flash_config.msg_mem_3);
+      case MODE_JT9:
+        msg_buffer[JT9_SYMBOL_COUNT] = 0xFF;
         break;
-      case BUFFER_4:
-        strcpy(msg_buffer, flash_config.msg_mem_4);
+      case MODE_JT4:
+        msg_buffer[JT4_SYMBOL_COUNT] = 0xFF;
         break;
-      }
-      
-      cur_msg_p = msg_buffer;
-      cur_character = '\0';
-  
-      // If in message delay mode, set the delay
-      if(msg_delay > 0)
-      {
-        msg_delay_end = cur_timer + get_msg_delay(msg_delay);
-      }
-  
-      // Reset Hell index
-      cur_hell_row = 0;
-      cur_hell_col = 0;
-  
-      // Reset WPM
-      if(cur_mode == MODE_CW)
-      {
-        wpm = flash_config.wpm;
-      }
-      else
-      {
-        wpm = dit_speed[cur_mode];
-      }
-      set_wpm(wpm);
-  
-      if(cur_mode == MODE_DFCW3 || cur_mode == MODE_DFCW6 || cur_mode == MODE_DFCW10 || cur_mode == MODE_DFCW120)
-      {
-        cur_state_end = cur_timer + (dit_length * MULT_WORDDELAY);
-        cur_state = STATE_PREAMBLE;
-      }
-      else
-      {
-        // Reset to IDLE state
-        cur_state_end = cur_timer;
-        cur_state = STATE_IDLE;
-      }
+      default:
+        break;
+    }
+    
+    cur_msg_p = msg_buffer;
+    cur_character = '\0';
+
+    // Build the display buffer
+    memset(display_buffer, 0, 22);
+    if(cur_mode == MODE_WSPR)
+    {
+      sprintf(display_buffer, "%s %s %d", flash_config.callsign, grid_4, flash_config.dbm);
+    }
+    else
+    {
+      strcpy(display_buffer, jt_message);
+    }
+
+    // Reset to IDLE state
+    cur_state_end = 0xFFFFFFFFFFFFFFFF;
+    cur_state = STATE_IDLE;
+  }
+  else
+  {
+    // Reset the message buffer
+    switch(cur_buffer)
+    {
+    case BUFFER_0:
+    default:
+      strcpy(msg_buffer, flash_config.callsign);
+      break;
+    case BUFFER_1:
+      strcpy(msg_buffer, flash_config.msg_mem_1);
+      break;
+    case BUFFER_2:
+      strcpy(msg_buffer, flash_config.msg_mem_2);
+      break;
+    case BUFFER_3:
+      strcpy(msg_buffer, flash_config.msg_mem_3);
+      break;
+    case BUFFER_4:
+      strcpy(msg_buffer, flash_config.msg_mem_4);
+      break;
+    }
+    
+    cur_msg_p = msg_buffer;
+    cur_character = '\0';
+
+    // If in message delay mode, set the delay
+    if(msg_delay > 0)
+    {
+      msg_delay_end = cur_timer + get_msg_delay(msg_delay);
+    }
+
+    // Reset Hell index
+    cur_hell_row = 0;
+    cur_hell_col = 0;
+
+    // Reset WPM
+    if(cur_mode == MODE_CW)
+    {
+      wpm = flash_config.wpm;
+    }
+    else
+    {
+      wpm = dit_speed[cur_mode];
+    }
+    set_wpm(wpm);
+
+    if(cur_mode == MODE_DFCW3 || cur_mode == MODE_DFCW6 || cur_mode == MODE_DFCW10 || cur_mode == MODE_DFCW120)
+    {
+      cur_state_end = cur_timer + (dit_length * MULT_WORDDELAY);
+      cur_state = STATE_PREAMBLE;
+    }
+    else
+    {
+      // Reset to IDLE state
+      cur_state_end = cur_timer;
+      cur_state = STATE_IDLE;
     }
   }
 }
@@ -950,6 +968,7 @@ void process_inputs(void)
           else
           {
             cur_menu = MENU_MAIN;
+            tx_reset();
             delay(50);
             break;
           }
@@ -960,6 +979,8 @@ void process_inputs(void)
       {
         // long press
         cur_menu = MENU_BAND;
+        tx_enable = false;
+        
         while(digitalRead(ENC_BTN) == LOW)
         {
           delay(50);
@@ -1046,6 +1067,7 @@ void process_inputs(void)
       case MENU_BAND:
       case MENU_MODE:
         cur_menu = MENU_MAIN;
+        tx_reset();
         break;
       }
       
@@ -1154,6 +1176,8 @@ void setup()
     flash_config.si5351_int_corr = DEFAULT_SI5351_INT_CORR;
     flash_config.si5351_ext_corr = DEFAULT_SI5351_EXT_CORR;
     flash_config.ext_gps_ant = DEFAULT_EXT_GPS_ANT;
+    flash_config.ext_pll_ref = DEFAULT_EXT_PLL_REF;
+    flash_config.ext_pll_ref_freq = DEFAULT_EXT_PLL_REF_FREQ;
     flash_config.dbm = DEFAULT_DBM;
     flash_store.write(flash_config);
   }
@@ -1166,6 +1190,8 @@ void setup()
   dfcw_offset = flash_config.dfcw_offset;
   cur_buffer = flash_config.buffer;
   corr = flash_config.si5351_int_corr; // account for ext and int
+  ext_gps_ant = flash_config.ext_gps_ant;
+  ext_pll_ref = flash_config.ext_pll_ref;
   strcpy(callsign, flash_config.callsign);
   dbm = flash_config.dbm;
   cur_state = STATE_IDLE;
@@ -1179,8 +1205,19 @@ void setup()
   // Initialize the Si5351A
   // (also initializes the Wire library for other functions
   //si5351.init(SI5351_VARIANT_C, SI5351_CRYSTAL_LOAD_8PF, 0);
-  si5351.init(SI5351_CRYSTAL_LOAD_8PF, 0);
-  si5351.set_correction(corr);
+  if(ext_pll_ref)
+  {
+    si5351.init(SI5351_CRYSTAL_LOAD_8PF, flash_config.ext_pll_ref_freq);
+    si5351.set_correction(corr);
+    si5351.set_pll_input(SI5351_PLLA, SI5351_PLL_INPUT_CLKIN);
+  }
+  else
+  {
+    si5351.init(SI5351_CRYSTAL_LOAD_8PF, 0);
+    si5351.set_correction(corr);
+    si5351.set_pll_input(SI5351_PLLA, SI5351_PLL_INPUT_XO);
+  }
+  //si5351.set_correction(corr);
   //si5351.set_pll_input(SI5351_PLLA, SI5351_PLL_INPUT_XO);
   si5351.set_clock_fanout(SI5351_FANOUT_MS, 1);
   si5351.set_clock_source(SI5351_CLK1, SI5351_CLK_SRC_MS0);
@@ -1192,14 +1229,15 @@ void setup()
   //si5351.output_enable(SI5351_CLK1, 0);
   //si5351.set_clock_pwr(SI5351_CLK1, 0);
   //si5351.set_freq(10000000ULL, 0, SI5351_CLK2);
+
   
   // Initialize the PA bias off
   set_pa_bias(PA_BIAS_FULL);
   //set_pa_bias(0);
 
   // Set up the message buffer
-  strcpy(msg_buffer, flash_config.msg_mem_1);
-  cur_msg_p = msg_buffer;
+  //strcpy(msg_buffer, flash_config.msg_mem_1);
+  //cur_msg_p = msg_buffer;
 
   memset(display_buffer, 0, 22);
 
@@ -1215,10 +1253,12 @@ void setup()
   if(cur_mode == MODE_WSPR || cur_mode == MODE_JT65 || cur_mode == MODE_JT9 || cur_mode == MODE_JT4)
   {
     //init_tx();
+    //tx_reset();
   }
   else
   {
-    init_tx();
+    //init_tx();
+    tx_reset();
   }
 }
 
@@ -1295,35 +1335,62 @@ void loop()
       }
 
       tx_lock = false;
-
-      if(msg_delay > 0 && msg_delay_end <= cur_timer && cur_msg_p == msg_buffer && cur_mode != MODE_CW)
+      
+      if(tx_enable)
       {
-        msg_delay_end = cur_timer + get_msg_delay(msg_delay);
-        cur_state_end = cur_timer + (dit_length * MULT_WORDDELAY);
-        cur_state = STATE_PREAMBLE;
-        break;
-      }
-
-      // If this is the first time thru the message loop, get the first character
-      if((cur_msg_p == msg_buffer) && (cur_character == '\0'))
-      {
-        cur_character = pgm_read_byte(&morsechar[(*cur_msg_p) - MORSE_CHAR_START]);
-      }
-
-      // Get the current element in the current character
-      if(cur_character != '\0')
-      {
-        if(cur_character == 0b10000000 || cur_character == 0b11111111)	// End of character marker or SPACE
+        if(msg_delay > 0 && msg_delay_end <= cur_timer && cur_msg_p == msg_buffer && 
+          (cur_mode == MODE_DFCW3 || cur_mode == MODE_DFCW6 || cur_mode == MODE_DFCW10 ||
+          cur_mode == MODE_DFCW120))
         {
-          // Set next state based on whether EOC or SPACE
-          if(cur_character == 0b10000000)
-          {
-            cur_state_end = cur_timer + (dit_length * MULT_DAH);
-            cur_state = STATE_DAHDELAY;
-            
-            // Grab next character, set state to inter-character delay
-            cur_msg_p++;
+          //msg_delay_end = cur_timer + get_msg_delay(msg_delay);
+          cur_state_end = cur_timer + (dit_length * MULT_WORDDELAY);
+          cur_state = STATE_PREAMBLE;
+          break;
+        }
+
+        msg_delay_end = cur_timer + get_msg_delay(msg_delay);
   
+        // If this is the first time thru the message loop, get the first character
+        if((cur_msg_p == msg_buffer) && (cur_character == '\0'))
+        {
+          cur_character = pgm_read_byte(&morsechar[(*cur_msg_p) - MORSE_CHAR_START]);
+        }
+  
+        // Get the current element in the current character
+        if(cur_character != '\0')
+        {
+          if(cur_character == 0b10000000 || cur_character == 0b11111111)	// End of character marker or SPACE
+          {
+            // Set next state based on whether EOC or SPACE
+            if(cur_character == 0b10000000)
+            {
+              cur_state_end = cur_timer + (dit_length * MULT_DAH);
+              cur_state = STATE_DAHDELAY;
+              
+              // Grab next character, set state to inter-character delay
+              cur_msg_p++;
+    
+              // If we read a NULL from the announce buffer, set cur_character to NULL,
+              // otherwise set to correct morse character
+              if((*cur_msg_p) == '\0')
+              {
+                cur_character = '\0';
+              }
+              else
+              {
+                cur_character = pgm_read_byte(&morsechar[(*cur_msg_p) - MORSE_CHAR_START]);
+              }
+            }
+            else
+            {
+              cur_state_end = cur_timer + (dit_length * MULT_WORDDELAY);
+              cur_state = STATE_WORDDELAY;
+            }
+  
+            // Grab next character, set state to inter-character delay
+            //cur_msg_p++;
+  
+            /*
             // If we read a NULL from the announce buffer, set cur_character to NULL,
             // otherwise set to correct morse character
             if((*cur_msg_p) == '\0')
@@ -1334,94 +1401,73 @@ void loop()
             {
               cur_character = pgm_read_byte(&morsechar[(*cur_msg_p) - MORSE_CHAR_START]);
             }
+            */
           }
           else
           {
-            cur_state_end = cur_timer + (dit_length * MULT_WORDDELAY);
-            cur_state = STATE_WORDDELAY;
+            // Mask off MSb, set cur_element
+            if((cur_character & 0b10000000) == 0b10000000)
+            {
+              cur_state_end = cur_timer + (dit_length * MULT_DAH);
+              cur_state = STATE_DAH;
+            }
+            else
+            {
+              cur_state_end = cur_timer + dit_length;
+              cur_state = STATE_DIT;
+            }
+  
+            // Shift left to get next element
+            cur_character = cur_character << 1;
           }
-
-          // Grab next character, set state to inter-character delay
-          //cur_msg_p++;
-
-          /*
-          // If we read a NULL from the announce buffer, set cur_character to NULL,
-          // otherwise set to correct morse character
-          if((*cur_msg_p) == '\0')
-          {
-            cur_character = '\0';
-          }
-          else
-          {
-            cur_character = pgm_read_byte(&morsechar[(*cur_msg_p) - MORSE_CHAR_START]);
-          }
-          */
         }
         else
         {
-          // Mask off MSb, set cur_element
-          if((cur_character & 0b10000000) == 0b10000000)
+          // Reload the message buffer and set buffer pointer back to beginning
+          switch(cur_buffer)
           {
-            cur_state_end = cur_timer + (dit_length * MULT_DAH);
-            cur_state = STATE_DAH;
+          case BUFFER_0:
+          default:
+            strcpy(msg_buffer, flash_config.callsign);
+            break;
+          case BUFFER_1:
+            strcpy(msg_buffer, flash_config.msg_mem_1);
+            break;
+          case BUFFER_2:
+            strcpy(msg_buffer, flash_config.msg_mem_2);
+            break;
+          case BUFFER_3:
+            strcpy(msg_buffer, flash_config.msg_mem_3);
+            break;
+          case BUFFER_4:
+            strcpy(msg_buffer, flash_config.msg_mem_4);
+            break;
           }
-          else
+          cur_msg_p = msg_buffer;
+          cur_character = '\0';
+  
+          if(msg_delay == 0)
           {
-            cur_state_end = cur_timer + dit_length;
-            cur_state = STATE_DIT;
-          }
-
-          // Shift left to get next element
-          cur_character = cur_character << 1;
-        }
-      }
-      else
-      {
-        // Reload the message buffer and set buffer pointer back to beginning
-        switch(cur_buffer)
-        {
-        case BUFFER_0:
-        default:
-          strcpy(msg_buffer, flash_config.callsign);
-          break;
-        case BUFFER_1:
-          strcpy(msg_buffer, flash_config.msg_mem_1);
-          break;
-        case BUFFER_2:
-          strcpy(msg_buffer, flash_config.msg_mem_2);
-          break;
-        case BUFFER_3:
-          strcpy(msg_buffer, flash_config.msg_mem_3);
-          break;
-        case BUFFER_4:
-          strcpy(msg_buffer, flash_config.msg_mem_4);
-          break;
-        }
-        cur_msg_p = msg_buffer;
-        cur_character = '\0';
-
-        if(msg_delay == 0)
-        {
-          // If a constantly repeating message, put a word delay at the end of message
-          cur_state_end = cur_timer + (dit_length * MULT_WORDDELAY);
-          cur_state = STATE_EOMDELAY;
-        }
-        else
-        {
-          // Otherwise, set the message delay time
-          if(msg_delay_end < (cur_timer + (dit_length * MULT_WORDDELAY)))
-          {
+            // If a constantly repeating message, put a word delay at the end of message
             cur_state_end = cur_timer + (dit_length * MULT_WORDDELAY);
+            cur_state = STATE_EOMDELAY;
           }
           else
           {
-            cur_state_end = msg_delay_end;
+            // Otherwise, set the message delay time
+            if(msg_delay_end < (cur_timer + (dit_length * MULT_WORDDELAY)))
+            {
+              cur_state_end = cur_timer + (dit_length * MULT_WORDDELAY);
+            }
+            else
+            {
+              cur_state_end = msg_delay_end;
+            }
+            
+    	      cur_state = STATE_MSGDELAY;
           }
-          
-  	      cur_state = STATE_MSGDELAY;
         }
       }
-
       break;
 
     case STATE_PREAMBLE:
@@ -1993,8 +2039,8 @@ void loop()
         {
           DynamicJsonBuffer jsonBuffer;
           JsonObject& root = jsonBuffer.createObject();
-          root["sensor"] = "gps";
-          root["time"] = 1351824120;
+          //root["sensor"] = "gps";
+          //root["time"] = 1351824120;
     
           root.printTo(SerialUSB);
           break;
@@ -2065,6 +2111,14 @@ void loop()
           {
             // validate data
             flash_config.ext_gps_ant = root["ext_gps_ant"].as<boolean>();
+          }
+          if(root.containsKey("ext_pll_ref"))
+          {
+            flash_config.ext_pll_ref = root["ext_pll_ref"].as<boolean>();
+          }
+          if(root.containsKey("ext_pll_ref_freq"))
+          {
+            flash_config.ext_pll_ref_freq = root["ext_pll_ref_freq"].as<uint32_t>();
           }
           
           flash_store.write(flash_config);

@@ -56,8 +56,9 @@ Here is the list of available configuration variables:
 * **callsign**
 * **grid**
 * **ext_gps_ant**
+* **ext_pll_ref**
 
 TODO
 ----
-    [] Internal/External Ref Osc
-    [] Internal/External GPS Antenna
+  - [] Internal/External Ref Osc
+  - [] Internal/External GPS Antenna
