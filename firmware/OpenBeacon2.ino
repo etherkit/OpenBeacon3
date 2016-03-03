@@ -6,9 +6,9 @@
 // ------------------
 // Flash Storage (https://github.com/cmaglie/FlashStorage)
 // TinyGPS++ (http://arduiniana.org/libraries/tinygpsplus/)
+// Etherkit SSD1306 (https://github.com/etherkit/SSD1306-Arduino)
 // Etherkit Si5351 (Library Manager)
 // Etherkit JTEncode (Library Manager)
-// Etherkit SSD1306
 // Scheduler (Library Manager)
 // ArduinoJson (Library Manager)
 // SPI (Arduino Standard Library)
@@ -432,7 +432,10 @@ uint8_t get_tx_current(void)
   txi_adc = analogRead(TXI);
   
   // Convert 10-bit ADC reading to milliamps
-  return (txi_adc * ANALOG_REF / 1024UL) / 10UL; // 10-bit ADC, shunt res. is 0.5 ohm, amp is x20
+  //return (txi_adc * ANALOG_REF / 1024UL) / 10UL; // 10-bit ADC, shunt res. is 0.5 ohm, amp is x20
+
+  // Convert 12-bit ADC reading to milliamps
+  return (txi_adc * ANALOG_REF / 4096UL) / 10UL; // 10-bit ADC, shunt res. is 0.5 ohm, amp is x20
 }
 
 // Return value in millivolts
@@ -445,7 +448,11 @@ uint16_t get_supply_voltage(void)
   
   // Convert 10-bit ADC reading to tenths of volts
   // Voltage divider is 4.7k and 22k
-  return ((vcc_adc * ANALOG_REF / 1024UL) * 267UL) / 47UL;
+  //return ((vcc_adc * ANALOG_REF / 1024UL) * 267UL) / 47UL;
+
+  // Convert 12-bit ADC reading to tenths of volts
+  // Voltage divider is 4.7k and 22k
+  return ((vcc_adc * ANALOG_REF / 4096UL) * 267UL) / 47UL;
 }
 
 void set_wpm(uint32_t new_wpm)
@@ -482,7 +489,6 @@ void init_tx(void)
   }
 }
 
-
 void tx_reset(void)
 {
   if(cur_mode == MODE_WSPR || cur_mode == MODE_JT65 || cur_mode == MODE_JT9 || cur_mode == MODE_JT4)
@@ -505,6 +511,7 @@ void tx_reset(void)
     strncpy(grid_4, cur_grid, 4);
 
     // Build JT message
+    // TODO: allow JT modes to use first 13 chars of any message buffer
     char jt_message[14];
     memset(jt_message, 0, 14);
     sprintf(jt_message, "%s %s HI", callsign, grid_4);
@@ -1153,6 +1160,8 @@ void setup()
   // Setup ADC pins
   pinMode(TXI, INPUT);
   pinMode(VCC, INPUT);
+
+  analogReadResolution(12);
 
   // Load the flash config
   flash_config = flash_store.read();
@@ -2106,6 +2115,11 @@ void loop()
           if(root.containsKey("grid"))
           {
             strcpy(flash_config.grid, root["grid"]);
+          }
+          if(root.containsKey("dbm"))
+          {
+            // validate data
+            flash_config.dbm = root["ext_gps_ant"].as<uint8_t>();
           }
           if(root.containsKey("ext_gps_ant"))
           {

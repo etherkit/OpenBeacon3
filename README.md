@@ -66,6 +66,9 @@ When using the CW, QRSS, DFCW, and Hell modes, five different message buffers ar
 
 In WSPR mode, OpenBeacon 2 uses the callsign specified in the ```callsign``` configuration variable, the current Maidenhead grid square as determined from GPS (or the default value placed in the ```grid``` configuration variable if the GPS does not have a location fix), and the power level specified in the  ```dbm``` configuration variable.
 
+Recurring Transmissions
+-----------------------
+
 Configuration
 -------------
 The configuration for OpenBeacon 2 is loaded via the included USB-UART bridge. To send configuration data, send OpenBeacon 2 a string consisting of the character 'W', followed by a JSON string setting the desired conifiguration variables, followed by a '@' termination character. For example:
