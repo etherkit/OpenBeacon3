@@ -40,6 +40,13 @@ User Interface
 
     Press button to toggle the state of recurring transmissions.
 
+
+Message Buffer System
+---------------------
+When using the CW, QRSS, DFCW, and Hell modes, five different message buffers are available for transmission. Message Buffer 0 is a special case and consists solely of the value set in the ```callsign``` configuration variable. Message Buffers 1 through 4 can be set to any 40 character (consisting of letters, numbers, or characters ```/```, ```=```, and ```?```)user message via the configuration system. OpenBeacon 2 can be set transmit the contents of any of the five message buffers during a transmit period.
+
+In WSPR mode, OpenBeacon 2 uses the callsign specified in the ```callsign``` configuration variable, the current Maidenhead grid square as determined from GPS (or the default value placed in the ```grid``` configuration variable if the GPS does not have a location fix), and the power level specified in the  ```dbm``` configuration variable.
+
 Configuration
 -------------
 The configuration for OpenBeacon 2 is loaded via the included USB-UART bridge. To send configuration data, send OpenBeacon 2 a string consisting of the character 'W', followed by a JSON string setting the desired conifiguration variables, followed by a '@' termination character. For example:
@@ -79,5 +86,6 @@ Connect OpenBeacon 2 to your PC via USB. In the Arduino IDE, select board type `
 
 TODO
 ----
-  - [] Internal/External Ref Osc
-  - [] Internal/External GPS Antenna
+  - [ ] Internal/External Ref Osc
+  - [ ] Internal/External GPS Antenna
+  - [ ] Get Hell mode working
