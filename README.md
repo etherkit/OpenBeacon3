@@ -14,6 +14,25 @@ Line 4: Message buffer contents
 
 Line 5: Button functions
 
+LEDs
+----
+* **D1** (red)
+
+    Transmit<br />
+    UART TX (during firmware loading)  
+
+* **D2** (green)
+
+    UART RX (during firmware loading)
+    
+* **D3** (blue)
+
+    PA enabled
+
+* **D5** (yellow)
+
+    Power
+
 User Interface
 --------------
 * **Tuning**
@@ -43,7 +62,7 @@ User Interface
 
 Message Buffer System
 ---------------------
-When using the CW, QRSS, DFCW, and Hell modes, five different message buffers are available for transmission. Message Buffer 0 is a special case and consists solely of the value set in the ```callsign``` configuration variable. Message Buffers 1 through 4 can be set to any 40 character (consisting of letters, numbers, or characters ```/```, ```=```, and ```?```)user message via the configuration system. OpenBeacon 2 can be set transmit the contents of any of the five message buffers during a transmit period.
+When using the CW, QRSS, DFCW, and Hell modes, five different message buffers are available for transmission. Message Buffer 0 is a special case and consists solely of the value set in the ```callsign``` configuration variable. Message Buffers 1 through 4 can be set to any 40 character (consisting of letters, numbers, or characters ```/```, ```=```, and ```?```) user message via the configuration system. OpenBeacon 2 can be set transmit the contents of any of the five message buffers during a transmit period.
 
 In WSPR mode, OpenBeacon 2 uses the callsign specified in the ```callsign``` configuration variable, the current Maidenhead grid square as determined from GPS (or the default value placed in the ```grid``` configuration variable if the GPS does not have a location fix), and the power level specified in the  ```dbm``` configuration variable.
 
@@ -62,6 +81,7 @@ Here is the list of available configuration variables:
 * **msg_mem_4**
 * **callsign**
 * **grid**
+* **dbm**
 * **ext_gps_ant**
 * **ext_pll_ref**
 * **ext_pll_ref_freq**
