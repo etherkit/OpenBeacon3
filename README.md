@@ -57,6 +57,25 @@ Here is the list of available configuration variables:
 * **grid**
 * **ext_gps_ant**
 * **ext_pll_ref**
+* **ext_pll_ref_freq**
+
+Required Libraries
+------------------
+Install these library from the indicated locations before attempting to compile and upload your own firmware.
+
+* Flash Storage [https://github.com/cmaglie/FlashStorage](https://github.com/cmaglie/FlashStorage)
+* TinyGPS++ [http://arduiniana.org/libraries/tinygpsplus/](http://arduiniana.org/libraries/tinygpsplus/)
+* Etherkit SSD1306 [https://github.com/etherkit/SSD1306-Arduino](https://github.com/etherkit/SSD1306-Arduino)
+* Etherkit Si5351 (Library Manager)
+* Etherkit JTEncode (Library Manager)
+* Scheduler (Library Manager)
+* ArduinoJson (Library Manager)
+* SPI (Arduino Standard Library)
+* Wire (Arduino Standard Library)
+
+Updating the Firmware
+---------------------
+Connect OpenBeacon 2 to your PC via USB. In the Arduino IDE, select board type ```Arduino/Genuino Zero (Native USB Port)``` and the correct virtual serial port. Sketches can be uploaded to OpenBeacon 2 as if it were a standard Arduino Zero (although a custom hardware configuration is coming soon).
 
 TODO
 ----
