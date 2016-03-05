@@ -56,9 +56,9 @@ JTEncode jtencode;
 #define DEFAULT_MSG_DELAY         10            // in minutes
 #define DEFAULT_MODE              MODE_WSPR
 #define DEFAULT_BAND              3             // 30 meters
-#define DEFAULT_CALLSIGN          "NT7S"
-#define DEFAULT_GRID              "CN85"
-#define DEFAULT_MSG_1             "MSG1"
+#define DEFAULT_CALLSIGN          "LA3PNA"
+#define DEFAULT_GRID              "JO59BR"
+#define DEFAULT_MSG_1             "OpenBeacon2"
 #define DEFAULT_MSG_2             "MSG2"
 #define DEFAULT_MSG_3             "MSG3"
 #define DEFAULT_MSG_4             "MSG4"
@@ -422,20 +422,37 @@ void set_pa_bias(uint16_t voltage)
   Wire.write(reg2);
   Wire.endTransmission();
 }
-
+volatile uint32_t current_a[6];
 // Return value in milliamps
 uint8_t get_tx_current(void)
 {
   uint32_t txi_adc;
-  
+  uint32_t temp = 0;
   // Get raw ADC reading from the current shunt
-  txi_adc = analogRead(TXI);
+ txi_adc = analogRead(TXI);
   
   // Convert 10-bit ADC reading to milliamps
   //return (txi_adc * ANALOG_REF / 1024UL) / 10UL; // 10-bit ADC, shunt res. is 0.5 ohm, amp is x20
 
   // Convert 12-bit ADC reading to milliamps
-  return (txi_adc * ANALOG_REF / 4096UL) / 10UL; // 10-bit ADC, shunt res. is 0.5 ohm, amp is x20
+ // return (txi_adc * ANALOG_REF / 4096UL) / 10UL; // 10-bit ADC, shunt res. is 0.5 ohm, amp is x20
+uint32_t tempcur = (txi_adc * ANALOG_REF / 4096UL) / 10UL; // 10-bit ADC, shunt res. is 0.5 ohm, amp is x20
+
+  for (int i=4; i>=0; i--)
+{
+current_a[i] = current_a[i+1];
+SerialUSB.print(current_a[i]);
+}
+SerialUSB.print("     ");
+current_a[5] = tempcur;
+for (int ijk=0;ijk<=5; ijk++)
+{
+temp = temp + current_a[ijk];
+}
+temp = (temp/6UL); 
+
+SerialUSB.println(temp);
+  return temp;
 }
 
 // Return value in millivolts
