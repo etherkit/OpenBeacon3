@@ -117,7 +117,7 @@ typedef struct
   boolean ext_gps_ant;
   boolean ext_pll_ref;
   uint32_t ext_pll_ref_freq;
-  uint8_t dbm;
+  uint8_t dbm; 
 } Config;
 
 // Instantiate flash storage
@@ -146,6 +146,7 @@ volatile boolean toggle = false;
 int32_t corr; // this is the correction factor for the Si5351, use calibration sketch to find value.
 unsigned int tune_step = 0; // This is in 10^tune_step Hz
 uint8_t tx_current;
+uint32_t current_a[6];
 uint16_t supply_voltage;
 uint32_t dit_length;
 enum MODE cur_mode;
@@ -422,7 +423,6 @@ void set_pa_bias(uint16_t voltage)
   Wire.write(reg2);
   Wire.endTransmission();
 }
-volatile uint32_t current_a[6];
 // Return value in milliamps
 uint8_t get_tx_current(void)
 {
@@ -438,12 +438,10 @@ uint8_t get_tx_current(void)
  // return (txi_adc * ANALOG_REF / 4096UL) / 10UL; // 10-bit ADC, shunt res. is 0.5 ohm, amp is x20
 uint32_t tempcur = (txi_adc * ANALOG_REF / 4096UL) / 10UL; // 10-bit ADC, shunt res. is 0.5 ohm, amp is x20
 
-  for (int i=4; i>=0; i--)
+  for (int i=4; i>=0; i--) // should probably use memmove();
 {
 current_a[i] = current_a[i+1];
-SerialUSB.print(current_a[i]);
 }
-SerialUSB.print("     ");
 current_a[5] = tempcur;
 for (int ijk=0;ijk<=5; ijk++)
 {
@@ -451,7 +449,6 @@ temp = temp + current_a[ijk];
 }
 temp = (temp/6UL); 
 
-SerialUSB.println(temp);
   return temp;
 }
 
