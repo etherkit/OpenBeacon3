@@ -1,4 +1,4 @@
-OpenBeacon 2
+OpenBeacon 3
 ============
 500 mW Si5351C-based MEPT Transmitter
 
